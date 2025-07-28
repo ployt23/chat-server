@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Real-Time Chat</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #1e1e1e;
+      color: #f1f1f1;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      background: #222;
+      padding: 10px;
+      text-align: center;
+    }
+    #clock {
+      font-size: 16px;
+      margin-top: 5px;
+      color: #aaa;
+    }
+    #login {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #chat {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: scroll;
+      padding: 10px;
+    }
+    #online-users {
+      font-size: 14px;
+      margin: 0 10px;
+    }
+    form {
+      display: flex;
+      padding: 10px;
+      background: #111;
+    }
+    input[type="text"], input[type="file"] {
+      flex: 1;
+      padding: 10px;
+      margin-right: 10px;
+      border: none;
+      border-radius: 5px;
+    }
+    button {
+      background: #28a745;
+      border: none;
+      padding: 10px 15px;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .message {
+      padding: 8px;
+      background: #333;
+      margin: 5px 0;
+      border-radius: 5px;
+    }
+    .message strong {
+      color: #4caf50;
+    }
+    .admin-controls {
+      display: none;
+      margin: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💬 Real-Time Chat</h1>
+    <div id="clock"></div>
+  </header>
+
+  <div id="login">
+    <h2>Login</h2>
+    <label><input type="radio" name="user" value="user1" checked> User 1</label>
+    <label><input type="radio" name="user" value="user2"> Admin</label><br><br>
+    <input type="password" id="password" placeholder="Admin password" style="display:none;"><br><br>
+    <button id="login-btn">Login</button>
+  </div>
+
+  <div id="chat">
+    <div id="online-users">Online: </div>
+    <div id="messages"></div>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="Type a message..." />
+      <input type="file" id="media" />
+      <button>Send</button>
+    </form>
+    <div class="admin-controls">
+      <button onclick="terminateSession()">❌ Quit Session</button>
+      <button onclick="clearAll()">🧹 Clear All</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const clock = document.getElementById("clock");
+    setInterval(() => {
+      const now = new Date();
+      clock.textContent = now.toLocaleTimeString();
+    }, 1000);
+
+    const loginDiv = document.getElementById("login");
+    const chatDiv = document.getElementById("chat");
+    const loginBtn = document.getElementById("login-btn");
+    const passwordInput = document.getElementById("password");
+    const adminControls = document.querySelector(".admin-controls");
+
+    let socket;
+    let username;
+
+    document.querySelectorAll('input[name="user"]').forEach(radio => {
+      radio.onchange = () => {
+        passwordInput.style.display = radio.value === "user2" ? "inline-block" : "none";
+      };
+    });
+
+    loginBtn.onclick = async () => {
+      username = document.querySelector('input[name="user"]:checked').value;
+      const password = passwordInput.value;
+
+      const res = await fetch("https://scientists-photographer-fixtures-weather.trycloudflare.com/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) return alert(data.error);
+
+      loginDiv.style.display = "none";
+      chatDiv.style.display = "flex";
+      if (username === "user2") adminControls.style.display = "block";
+
+      socket = io("https://scientists-photographer-fixtures-weather.trycloudflare.com", {
+        auth: { token: data.token },
+        transports: ["websocket", "polling"]
+      });
+
+      socket.on("chat message", (msg) => {
+        const item = document.createElement("div");
+        item.classList.add("message");
+        if (msg.media) {
+          const media = document.createElement("a");
+          media.href = msg.media;
+          media.textContent = "📎 Media";
+          media.target = "_blank";
+          item.appendChild(media);
+        }
+        if (msg.text) {
+          const strong = document.createElement("strong");
+          strong.textContent = msg.username + ": ";
+          item.appendChild(strong);
+          item.appendChild(document.createTextNode(msg.text));
+        }
+        document.getElementById("messages").appendChild(item);
+      });
+
+      socket.on("chat history", (msgs) => {
+        document.getElementById("messages").innerHTML = "";
+        msgs.forEach((msg) => {
+          const item = document.createElement("div");
+          item.classList.add("message");
+          if (msg.media) {
+            const media = document.createElement("a");
+            media.href = msg.media;
+            media.textContent = "📎 Media";
+            media.target = "_blank";
+            item.appendChild(media);
+          }
+          if (msg.text) {
+            const strong = document.createElement("strong");
+            strong.textContent = msg.username + ": ";
+            item.appendChild(strong);
+            item.appendChild(document.createTextNode(msg.text));
+          }
+          document.getElementById("messages").appendChild(item);
+        });
+      });
+
+      socket.on("online", (users) => {
+        document.getElementById("online-users").textContent = "Online: " + users.join(", ");
+      });
+    };
+
+    document.getElementById("form").onsubmit = (e) => {
+      e.preventDefault();
+      const input = document.getElementById("input");
+      const media = document.getElementById("media");
+      const data = {};
+      if (input.value) data.text = input.value;
+      if (media.files.length) {
+        const url = URL.createObjectURL(media.files[0]);
+        data.media = url;
+      }
+      socket.emit("chat message", data);
+      input.value = "";
+      media.value = "";
+    };
+
+    function terminateSession() {
+      const target = prompt("Terminate which user?");
+      if (target) socket.emit("terminate", target);
+    }
+
+    function clearAll() {
+      if (confirm("Clear all chat messages?")) {
+        socket.emit("clear-all");
+      }
+    }
+  </script>
+</body>
+</html> 
