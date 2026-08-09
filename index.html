@@ -204,8 +204,19 @@
         transports: ["websocket", "polling"],
       });
 
-      // Register this user so Online: updates correctly
-      socket.emit("join", username);
+      socket.on("connect", () => {
+        console.log("Socket connected:", socket.id);
+        socket.emit("join", username);
+      });
+
+      socket.on("connect_error", (err) => {
+        console.error("Socket connection error:", err);
+        alert("Socket connection failed: " + err.message);
+      });
+
+      socket.on("disconnect", (reason) => {
+        console.log("Socket disconnected:", reason);
+      });
 
       socket.on("chat message", renderMessage);
 
