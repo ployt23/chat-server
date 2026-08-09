@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Real-Time Chat</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       font-family: Arial, sans-serif;
       background: #1e1e1e;
@@ -14,47 +15,31 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      transition: background 0.3s, color 0.3s;
     }
-    header {
-      background: #222;
-      padding: 10px;
-      text-align: center;
-    }
-    #clock {
-      font-size: 16px;
-      margin-top: 5px;
-      color: #aaa;
-    }
+    header { background: #222; padding: 10px; text-align: center; }
+    #clock { font-size: 16px; margin-top: 5px; color: #aaa; }
     #login {
       flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      padding: 20px;
     }
-    #chat {
-      display: none;
-      flex: 1;
-      flex-direction: column;
-    }
-    #messages {
-      flex: 1;
-      overflow-y: scroll;
-      padding: 10px;
-    }
-    #online-users {
-      font-size: 14px;
-      margin: 0 10px;
-    }
+    #chat { display: none; flex: 1; flex-direction: column; }
+    #messages { flex: 1; overflow-y: auto; padding: 10px; }
+    #online-users { font-size: 14px; margin: 0 10px; }
     form {
       display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
       padding: 10px;
       background: #111;
     }
     input[type="text"], input[type="file"] {
-      flex: 1;
+      flex: 1 1 auto;
       padding: 10px;
-      margin-right: 10px;
       border: none;
       border-radius: 5px;
     }
@@ -71,14 +56,35 @@
       background: #333;
       margin: 5px 0;
       border-radius: 5px;
+      word-wrap: break-word;
+      position: relative;
     }
-    .message strong {
-      color: #4caf50;
+    .message strong { color: #4caf50; }
+    .timestamp {
+      color: #888;
+      font-size: 12px;
+      margin-left: 5px;
     }
+    .delete-btn {
+      position: absolute;
+      right: 5px;
+      top: 5px;
+      background: transparent;
+      border: none;
+      color: red;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .typing { font-size: 12px; color: #aaa; padding: 0 10px; }
     .admin-controls {
       display: none;
       margin: 10px;
+      gap: 10px;
+      flex-wrap: wrap;
     }
+    .light-mode { background: #fff; color: #000; }
+    .light-mode header { background: #eee; color: #000; }
+    .light-mode .message { background: #f2f2f2; }
   </style>
 </head>
 <body>
@@ -90,141 +96,211 @@
   <div id="login">
     <h2>Login</h2>
     <label><input type="radio" name="user" value="user1" checked> User 1</label>
-    <label><input type="radio" name="user" value="user2"> Admin</label><br><br>
-    <input type="password" id="password" placeholder="Admin password" style="display:none;"><br><br>
+    <label><input type="radio" name="user" value="user2"> Admin</label>
+    <br><br>
+    <input type="password" id="user-password" placeholder="User password">
+    <br><br>
+    <input type="password" id="admin-password" placeholder="Admin password" style="display:none;">
+    <br><br>
     <button id="login-btn">Login</button>
   </div>
 
   <div id="chat">
-    <div id="online-users">Online: </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 10px;">
+      <div>
+        <div id="online-users">Online: </div>
+        <div class="typing" id="typing-indicator"></div>
+      </div>
+      <div>
+        <button id="theme-toggle" style="background:#555;">Toggle Theme</button>
+        <button id="logout-btn" style="background: #dc3545;">Logout</button>
+      </div>
+    </div>
+
     <div id="messages"></div>
+
     <form id="form">
       <input id="input" autocomplete="off" placeholder="Type a message..." />
-      <input type="file" id="media" />
-      <button>Send</button>
+      <button type="submit">Send</button>
     </form>
-    <div class="admin-controls">
-      <button onclick="terminateSession()">❌ Quit Session</button>
-      <button onclick="clearAll()">🧹 Clear All</button>
+
+    <div class="admin-controls" id="controls">
+      <button id="clear-btn">🧹 Clear All</button>
+      <button id="terminate-btn" style="display: none;">❌ Quit Session</button>
     </div>
   </div>
 
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
   <script>
     const clock = document.getElementById("clock");
-    setInterval(() => {
-      const now = new Date();
-      clock.textContent = now.toLocaleTimeString();
-    }, 1000);
+    setInterval(() => (clock.textContent = new Date().toLocaleTimeString()), 1000);
 
     const loginDiv = document.getElementById("login");
     const chatDiv = document.getElementById("chat");
     const loginBtn = document.getElementById("login-btn");
-    const passwordInput = document.getElementById("password");
-    const adminControls = document.querySelector(".admin-controls");
+    const logoutBtn = document.getElementById("logout-btn");
+    const themeToggle = document.getElementById("theme-toggle");
+    const typingIndicator = document.getElementById("typing-indicator");
+    const userPasswordInput = document.getElementById("user-password");
+    const adminPasswordInput = document.getElementById("admin-password");
+    const controls = document.getElementById("controls");
+    const terminateBtn = document.getElementById("terminate-btn");
+    const messagesDiv = document.getElementById("messages");
 
-    let socket;
-    let username;
+    let socket, username, typingTimeout;
 
-    document.querySelectorAll('input[name="user"]').forEach(radio => {
+    document.querySelectorAll('input[name="user"]').forEach((radio) => {
       radio.onchange = () => {
-        passwordInput.style.display = radio.value === "user2" ? "inline-block" : "none";
+        if (radio.value === "user2") {
+          adminPasswordInput.style.display = "inline-block";
+          userPasswordInput.style.display = "none";
+        } else {
+          adminPasswordInput.style.display = "none";
+          userPasswordInput.style.display = "inline-block";
+        }
       };
     });
 
+    if (localStorage.getItem("lastUser")) {
+      document.querySelector(
+        `input[name="user"][value="${localStorage.getItem("lastUser")}"]`
+      ).checked = true;
+    }
+
     loginBtn.onclick = async () => {
       username = document.querySelector('input[name="user"]:checked').value;
-      const password = passwordInput.value;
+      const password =
+        username === "user2" ? adminPasswordInput.value : userPasswordInput.value;
 
-      const res = await fetch("https://liberty-eleven-sodium-wallet.trycloudflare.com//login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
+      localStorage.setItem("lastUser", username);
+
+      if (
+        (username === "user1" && password !== "ze") ||
+        (username === "user2" && password !== "sel1")
+      ) {
+        alert("Incorrect password");
+        return;
+      }
+
+      const res = await fetch(
+        "https://tom-markets-convenient-desert.trycloudflare.com/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        }
+      );
 
       const data = await res.json();
       if (!res.ok) return alert(data.error);
 
       loginDiv.style.display = "none";
       chatDiv.style.display = "flex";
-      if (username === "user2") adminControls.style.display = "block";
+      controls.style.display = "flex";
+      if (username === "user2") terminateBtn.style.display = "inline-block";
 
-      socket = io("https://liberty-eleven-sodium-wallet.trycloudflare.com/", {
+      socket = io("https://tom-markets-convenient-desert.trycloudflare.com", {
         auth: { token: data.token },
-        transports: ["websocket", "polling"]
+        transports: ["websocket", "polling"],
       });
 
-      socket.on("chat message", (msg) => {
-        const item = document.createElement("div");
-        item.classList.add("message");
-        if (msg.media) {
-          const media = document.createElement("a");
-          media.href = msg.media;
-          media.textContent = "📎 Media";
-          media.target = "_blank";
-          item.appendChild(media);
-        }
-        if (msg.text) {
-          const strong = document.createElement("strong");
-          strong.textContent = msg.username + ": ";
-          item.appendChild(strong);
-          item.appendChild(document.createTextNode(msg.text));
-        }
-        document.getElementById("messages").appendChild(item);
-      });
+      // Register this user so Online: updates correctly
+      socket.emit("join", username);
+
+      socket.on("chat message", renderMessage);
 
       socket.on("chat history", (msgs) => {
-        document.getElementById("messages").innerHTML = "";
-        msgs.forEach((msg) => {
-          const item = document.createElement("div");
-          item.classList.add("message");
-          if (msg.media) {
-            const media = document.createElement("a");
-            media.href = msg.media;
-            media.textContent = "📎 Media";
-            media.target = "_blank";
-            item.appendChild(media);
-          }
-          if (msg.text) {
-            const strong = document.createElement("strong");
-            strong.textContent = msg.username + ": ";
-            item.appendChild(strong);
-            item.appendChild(document.createTextNode(msg.text));
-          }
-          document.getElementById("messages").appendChild(item);
-        });
+        messagesDiv.innerHTML = "";
+        msgs.forEach(renderMessage);
       });
 
       socket.on("online", (users) => {
-        document.getElementById("online-users").textContent = "Online: " + users.join(", ");
+        document.getElementById("online-users").textContent =
+          "Online: " + users.join(", ");
+      });
+
+      socket.on("typing", (user) => {
+        typingIndicator.textContent =
+          user && user !== username ? `${user} is typing...` : "";
       });
     };
 
-    document.getElementById("form").onsubmit = (e) => {
-      e.preventDefault();
-      const input = document.getElementById("input");
-      const media = document.getElementById("media");
-      const data = {};
-      if (input.value) data.text = input.value;
-      if (media.files.length) {
-        const url = URL.createObjectURL(media.files[0]);
-        data.media = url;
+    function formatTimestamp(time) {
+      const date = new Date(time);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return isToday ? `Today ${timeStr}` : `${date.toDateString()} ${timeStr}`;
+    }
+
+    function renderMessage(msg) {
+      const item = document.createElement("div");
+      item.classList.add("message");
+
+      if (msg.username === username) {
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "✖";
+        delBtn.className = "delete-btn";
+        delBtn.onclick = () => item.remove();
+        item.appendChild(delBtn);
       }
+
+      if (msg.text) {
+        const strong = document.createElement("strong");
+        strong.textContent = msg.username + ": ";
+        item.appendChild(strong);
+
+        const timestamp = document.createElement("span");
+        timestamp.classList.add("timestamp");
+        timestamp.textContent = formatTimestamp(msg.time || new Date());
+        item.appendChild(timestamp);
+
+        item.appendChild(document.createTextNode(" " + msg.text));
+      }
+
+      messagesDiv.appendChild(item);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    document.getElementById("form").onsubmit = async (e) => {
+      e.preventDefault();
+
+      const input = document.getElementById("input");
+      const data = { username, time: new Date().toISOString() };
+
+      if (input.value) data.text = input.value;
+
       socket.emit("chat message", data);
       input.value = "";
-      media.value = "";
+      socket.emit("typing", "");
     };
 
-    function terminateSession() {
+    document.getElementById("input").oninput = () => {
+      socket.emit("typing", username);
+      clearTimeout(typingTimeout);
+      typingTimeout = setTimeout(() => socket.emit("typing", ""), 1000);
+    };
+
+    document.getElementById("clear-btn").onclick = () => {
+      if (confirm("Clear all chat messages?")) socket.emit("clear-all");
+    };
+
+    document.getElementById("terminate-btn").onclick = () => {
       const target = prompt("Terminate which user?");
       if (target) socket.emit("terminate", target);
-    }
+    };
 
-    function clearAll() {
-      if (confirm("Clear all chat messages?")) {
-        socket.emit("clear-all");
-      }
-    }
+    logoutBtn.onclick = () => {
+      if (socket) socket.disconnect();
+      username = null;
+      messagesDiv.innerHTML = "";
+      chatDiv.style.display = "none";
+      loginDiv.style.display = "flex";
+      userPasswordInput.value = "";
+      adminPasswordInput.value = "";
+    };
+
+    themeToggle.onclick = () => document.body.classList.toggle("light-mode");
   </script>
 </body>
-</html> 
+</html>
