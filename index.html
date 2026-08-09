@@ -136,7 +136,7 @@
       username = document.querySelector('input[name="user"]:checked').value;
       const password = passwordInput.value;
 
-      const res = await fetch("https://scientists-photographer-fixtures-weather.trycloudflare.com/login", {
+      const res = await fetch("https://liberty-eleven-sodium-wallet.trycloudflare.com//login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password })
@@ -149,7 +149,7 @@
       chatDiv.style.display = "flex";
       if (username === "user2") adminControls.style.display = "block";
 
-      socket = io("https://scientists-photographer-fixtures-weather.trycloudflare.com", {
+      socket = io("https://liberty-eleven-sodium-wallet.trycloudflare.com/", {
         auth: { token: data.token },
         transports: ["websocket", "polling"]
       });
